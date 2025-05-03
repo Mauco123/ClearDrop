@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paquetería Blockchain</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.21.2/babel.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div id="app"></div>
+
+    <script type="text/babel">
+        // Componentes de React
+        const { useState, useEffect } = React;
+
+        // Dirección del contrato (deberá reemplazarse con la dirección real después del despliegue)
+        const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000";
+        
+        // ABI del contrato (basado en nuestro DeliveryEscrow.sol)
+        const CONTRACT_ABI = [
+            // Eventos
+            "event OrderCreated(uint256 orderId, address indexed buyer, address indexed seller, uint256 amount)",
+            "event DeliverySubmitted(uint256 orderId, bytes32 photoHash, string location)",
+            "event DeliveryConfirmed(uint256 orderId)",
+            "event PaymentReleased(uint256 orderId)",
+            "event DisputeCreated(uint256 orderId, string reason)",
+            "event DisputeResolved(uint256 orderId, bool buyerFavored)",
+            
+            // Funciones de lectura
+            "function orderCount() view returns (uint256)",
+            "function orders(uint256 orderId) view returns (address buyer, address seller, uint256 amount, bytes32 photoHash, string deliveryLocation, uint8 status, uint256 deliveryTimestamp)",
+            "function admin() view returns (address)",
+            "function gracePeriod() view returns (uint256)",
+            
+            // Funciones de escritura
+            "function createOrder(address _seller) payable returns (uint256)",
+            "function submitDelivery(uint256 _orderId, bytes32 _photoHash, string calldata _location) external",
+            "function confirmDelivery(uint256 _orderId) external",
+            "function autoRelease(uint256 _orderId) external",
+            "function createDispute(uint256 _orderId, string calldata _reason) external",
+            "function resolveDispute(uint256 _orderId, bool _buyerFavored) external",
+            "function setGracePeriod(uint256 _newPeriod) external",
+            "function transferAdmin(address _newAdmin) external"
+        ];
+
+        // Estados de una orden
+        const DeliveryStatus = {
+            0: "Pendiente",
+            1: "Entregado",
+            2: "Confirmado",
+            3: "En Disputa",
+            4: "Liberado"
+        };
+
+        // Componente para conectar la wallet
+        function WalletConnector({ onConnect }) {
+            const [connecting, setConnecting] = useState(false);
+            
+            async function connectWallet() {
+                setConnecting(true);
+                try {
+                    // Solicitar conexión a MetaMask
+                    if (window.ethereum) {
+                        const provider = new ethers.providers.Web3Provider(window.ethereum);
+                        await provider.send("eth_requestAccounts", []);
+                        const signer = provider.getSigner();
+                        const address = await signer.getAddress();
+                        
+                        // Conectar al contrato
+                        const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+                        
+                        onConnect({provider, signer, address, contract});
+                    } else {
+                        alert("Por favor instala MetaMask para usar esta aplicación");
+                    }
+                } catch (error) {
+                    console.error("Error al conectar:", error);
+                    alert("Error al conectar: " + error.message);
+                } finally {
+                    setConnecting(false);
+                }
+            }
+            
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen">
+                    <div className="p-8 bg-white rounded-lg shadow-lg text-center">
+                        <h1 className="text-3xl font-bold mb-6 text-gray-800">Paquetería Blockchain</h1>
+                        <p className="mb-8 text-gray-600">Servicio de paquetería con pagos y entregas verificados en blockchain</p>
+                        <button 
+                            onClick={connectWallet}
+                            disabled={connecting}
+                            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-300 disabled:opacity-50"
+                        >
+                            {connecting ? "Conectando..." : "Conectar Wallet"}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // Componente para crear una nueva orden
+        function CreateOrder({ contract, address, onOrderCreated }) {
+            const [sellerAddress, setSellerAddress] = useState("");
+            const [amount, setAmount] = useState("");
+            const [creating, setCreating] = useState(false);
+            
+            async function handleCreateOrder(e) {
+                e.preventDefault();
+                
+                if (!ethers.utils.isAddress(sellerAddress)) {
+                    alert("Por favor ingrese una dirección de vendedor válida");
+                    return;
+                }
+                
+                if (!amount || parseFloat(amount) <= 0) {
+                    alert("Por favor ingrese un monto válido");
+                    return;
+                }
+                
+                setCreating(true);
+                try {
+                    // Convertir el monto a wei
+                    const amountWei = ethers.utils.parseEther(amount);
+                    
+                    // Llamar al contrato
+                    const tx = await contract.createOrder(sellerAddress, {
+                        value: amountWei
+                    });
+                    
+                    // Esperar a que la transacción sea minada
+                    const receipt = await tx.wait();
+                    
+                    // Buscar el evento OrderCreated
+                    const event = receipt.events.find(e => e.event === "OrderCreated");
+                    if (event) {
+                        const orderId = event.args.orderId.toNumber();
+                        alert(`¡Orden #${orderId} creada exitosamente!`);
+                        onOrderCreated();
+                        
+                        // Limpiar el formulario
+                        setSellerAddress("");
+                        setAmount("");
+                    }
+                } catch (error) {
+                    console.error("Error al crear la orden:", error);
+                    alert("Error al crear la orden: " + error.message);
+                } finally {
+                    setCreating(false);
+                }
+            }
+            
+            return (
+                <div className="bg-white p-6 rounded-lg shadow-md mb-6">
+                    <h2 className="text-xl font-semibold mb-4">Crear Nueva Orden</h2>
+                    <form onSubmit={handleCreateOrder}>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 mb-2">Dirección del Vendedor</label>
+                            <input 
+                                type="text" 
+                                value={sellerAddress} 
+                                onChange={(e) => setSellerAddress(e.target.value)}
+                                placeholder="0x..."
+                                className="w-full px-4 py-2 border rounded-md"
+                                required
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 mb-2">Monto (ETH)</label>
+                            <input 
+                                type="number"
+                                step="0.001"
+                                value={amount} 
+                                onChange={(e) => setAmount(e.target.value)}
+                                placeholder="0.01"
+                                className="w-full px-4 py-2 border rounded-md"
+                                required
+                            />
+                        </div>
+                        <button 
+                            type="submit"
+                            disabled={creating}
+                            className="w-full bg-green-600 text-white py-2 px-6 rounded-md hover:bg-green-700 transition duration-300 disabled:opacity-50"
+                        >
+                            {creating ? "Creando..." : "Crear Orden"}
+                        </button>
+                    </form>
+                </div>
+            );
+        }
+
+        // Componente para mostrar una orden
+        function OrderItem({ order, orderId, contract, address, onAction }) {
+            const { buyer, seller, amount, status, deliveryLocation, deliveryTimestamp } = order;
+            const isBuyer = buyer.toLowerCase() === address.toLowerCase();
+            const isSeller = seller.toLowerCase() === address.toLowerCase();
+            const statusText = DeliveryStatus[status];
+            
+            // Formato para la cantidad en ETH
+            const amountEth = ethers.utils.formatEther(amount);
+            
+            // Formato para la fecha de entrega
+            const deliveryDate = deliveryTimestamp.toNumber() > 0 
+                ? new Date(deliveryTimestamp.toNumber() * 1000).toLocaleString() 
+                : "No entregado";
+            
+            // Acortar direcciones para visualización
+            const shortAddress = (addr) => addr.substring(0, 6) + "..." + addr.substring(addr.length - 4);
+            
+            // Manejar confirmación de entrega (como comprador)
+            async function handleConfirmDelivery() {
+                try {
+                    const tx = await contract.confirmDelivery(orderId);
+                    await tx.wait();
+                    alert(`¡Entrega de orden #${orderId} confirmada exitosamente!`);
+                    onAction();
+                } catch (error) {
+                    console.error("Error al confirmar entrega:", error);
+                    alert("Error al confirmar entrega: " + error.message);
+                }
+            }
+            
+            // Manejar envío de entrega (como vendedor)
+            async function handleSubmitDelivery() {
+                try {
+                    // En una aplicación real, aquí se cargaría la imagen y se obtendría su hash
+                    // Para este ejemplo, usamos un hash fijo
+                    const photoHash = ethers.utils.id("fotoDePrueba" + Date.now());
+                    
+                    // En una aplicación real, aquí se obtendría la ubicación real desde el GPS
+                    const location = "Latitud: 19.432608, Longitud: -99.133209";
+                    
+                    const tx = await contract.submitDelivery(
+                        orderId,
+                        photoHash,
+                        location
+                    );
+                    await tx.wait();
+                    alert(`¡Entrega de orden #${orderId} registrada exitosamente!`);
+                    onAction();
+                } catch (error) {
+                    console.error("Error al registrar entrega:", error);
+                    alert("Error al registrar entrega: " + error.message);
+                }
+            }
+            
+            // Manejar disputa (como comprador)
+            async function handleCreateDispute() {
+                const reason = prompt("Por favor, indique el motivo de la disputa:");
+                if (!reason) return;
+                
+                try {
+                    const tx = await contract.createDispute(orderId, reason);
+                    await tx.wait();
+                    alert(`Disputa para orden #${orderId} registrada exitosamente`);
+                    onAction();
+                } catch (error) {
+                    console.error("Error al crear disputa:", error);
+                    alert("Error al crear disputa: " + error.message);
+                }
+            }
+            
+            // Manejar liberación automática (cualquiera puede llamar)
+            async function handleAutoRelease() {
+                try {
+                    const tx = await contract.autoRelease(orderId);
+                    await tx.wait();
+                    alert(`¡Pago de orden #${orderId} liberado automáticamente!`);
+                    onAction();
+                } catch (error) {
+                    console.error("Error al liberar automáticamente:", error);
+                    alert("Error al liberar automáticamente: " + error.message);
+                }
+            }
+            
+            return (
+                <div className="bg-white p-6 rounded-lg shadow-md mb-4 border-l-4 border-blue-600">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="text-lg font-semibold">Orden #{orderId}</h3>
+                        <span className={`px-3 py-1 rounded-full text-sm text-white ${
+                            status === 0 ? "bg-yellow-500" : 
+                            status === 1 ? "bg-blue-500" : 
+                            status === 2 ? "bg-green-500" : 
+                            status === 3 ? "bg-red-500" : "bg-gray-500"
+                        }`}>
+                            {statusText}
+                        </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                        <div>
+                            <p className="text-sm text-gray-500">Comprador</p>
+                            <p className="font-medium">{shortAddress(buyer)} {isBuyer && "(Tú)"}</p>
+                        </div>
+                        <div>
+                            <p className="text-sm text-gray-500">Vendedor</p>
+                            <p className="font-medium">{shortAddress(seller)} {isSeller && "(Tú)"}</p>
+                        </div>
+                        <div>
+                            <p className="text-sm text-gray-500">Monto</p>
+                            <p className="font-medium">{amountEth} ETH</p>
+                        </div>
+                        <div>
+                            <p className="text-sm text-gray-500">Fecha Entrega</p>
+                            <p className="font-medium">{deliveryDate}</p>
+                        </div>
+                    </div>
+                    
+                    {deliveryLocation && (
+                        <div className="mb-4">
+                            <p className="text-sm text-gray-500">Ubicación de Entrega</p>
+                            <p className="text-sm bg-gray-100 p-2 rounded">{deliveryLocation}</p>
+                        </div>
+                    )}
+                    
+                    <div className="flex flex-wrap gap-2 mt-4">
+                        {isSeller && status === 0 && (
+                            <button 
+                                onClick={handleSubmitDelivery}
+                                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                            >
+                                Registrar Entrega
+                            </button>
+                        )}
+                        
+                        {isBuyer && status === 1 && (
+                            <>
+                                <button 
+                                    onClick={handleConfirmDelivery}
+                                    className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                                >
+                                    Confirmar Entrega
+                                </button>
+                                <button 
+                                    onClick={handleCreateDispute}
+                                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                                >
+                                    Crear Disputa
+                                </button>
+                            </>
+                        )}
+                        
+                        {status === 1 && deliveryTimestamp.toNumber() > 0 && (
+                            <button 
+                                onClick={handleAutoRelease}
+                                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
+                            >
+                                Intentar Liberación Automática
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Componente para mostrar la lista de órdenes
+        function OrdersList({ contract, address }) {
+            const [orders, setOrders] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [filter, setFilter] = useState("all"); // all, buyer, seller
+            
+            // Cargar órdenes al inicio y cuando se realice una acción
+            useEffect(() => {
+                loadOrders();
+            }, []);
+            
+            async function loadOrders() {
+                setLoading(true);
+                try {
+                    // Obtener el número de órdenes
+                    const count = await contract.orderCount();
+                    
+                    // Crear un array para almacenar las órdenes
+                    const ordersData = [];
+                    
+                    // Obtener cada orden
+                    for (let i = 1; i <= count; i++) {
+                        const order = await contract.orders(i);
+                        
+                        // Agregar el ID de la orden
+                        ordersData.push({
+                            id: i,
+                            ...order
+                        });
+                    }
+                    
+                    // Ordenar por ID (más reciente primero)
+                    ordersData.sort((a, b) => b.id - a.id);
+                    
+                    setOrders(ordersData);
+                } catch (error) {
+                    console.error("Error al cargar órdenes:", error);
+                } finally {
+                    setLoading(false);
+                }
+            }
+            
+            // Filtrar órdenes según el criterio seleccionado
+            const filteredOrders = orders.filter(order => {
+                if (filter === "all") return true;
+                if (filter === "buyer") return order.buyer.toLowerCase() === address.toLowerCase();
+                if (filter === "seller") return order.seller.toLowerCase() === address.toLowerCase();
+                return true;
+            });
+            
+            return (
+                <div>
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold">Órdenes</h2>
+                        <div className="flex items-center">
+                            <span className="mr-2">Filtrar:</span>
+                            <select 
+                                value={filter}
+                                onChange={(e) => setFilter(e.target.value)}
+                                className="border rounded p-2"
+                            >
+                                <option value="all">Todas</option>
+                                <option value="buyer">Como Comprador</option>
+                                <option value="seller">Como Vendedor</option>
+                            </select>
+                            <button 
+                                onClick={loadOrders}
+                                className="ml-4 p-2 bg-gray-200 rounded hover:bg-gray-300"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {loading ? (
+                        <div className="text-center py-8">
+                            <p className="text-gray-500">Cargando órdenes...</p>
+                        </div>
+                    ) : filteredOrders.length === 0 ? (
+                        <div className="text-center py-8 bg-white rounded-lg shadow">
+                            <p className="text-gray-500">No hay órdenes para mostrar</p>
+                            {filter !== "all" && (
+                                <button 
+                                    onClick={() => setFilter("all")}
+                                    className="mt-4 text-blue-600 hover:underline"
+                                >
+                                    Mostrar todas las órdenes
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <div>
+                            {filteredOrders.map(order => (
+                                <OrderItem 
+                                    key={order.id}
+                                    order={order}
+                                    orderId={order.id}
+                                    contract={contract}
+                                    address={address}
+                                    onAction={loadOrders}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Componente principal
+        function App() {
+            const [walletData, setWalletData] = useState(null);
+            
+            // Manejar conexión de wallet
+            function handleConnect(data) {
+                setWalletData(data);
+            }
+            
+            return (
+                <div className="container mx-auto px-4 py-8">
+                    {!walletData ? (
+                        <WalletConnector onConnect={handleConnect} />
+                    ) : (
+                        <div>
+                            <header className="mb-8">
+                                <div className="flex justify-between items-center">
+                                    <h1 className="text-3xl font-bold">Paquetería Blockchain</h1>
+                                    <div className="bg-blue-100 px-4 py-2 rounded-lg">
+                                        <p className="text-sm">Conectado: <span className="font-mono">{walletData.address.substring(0, 6)}...{walletData.address.substring(walletData.address.length - 4)}</span></p>
+                                    </div>
+                                </div>
+                            </header>
+                            
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                <div className="lg:col-span-1">
+                                    <CreateOrder 
+                                        contract={walletData.contract}
+                                        address={walletData.address}
+                                        onOrderCreated={() => walletData.contract.orderCount()}
+                                    />
+                                </div>
+                                <div className="lg:col-span-2">
+                                    <OrdersList 
+                                        contract={walletData.contract}
+                                        address={walletData.address}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Renderizar la aplicación
+        ReactDOM.render(<App />, document.getElementById('app'));
+    </script>
+</body>
+</html>
