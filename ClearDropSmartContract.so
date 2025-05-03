@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract DeliveryEscrow {
+    enum DeliveryStatus { Pending, Delivered, Confirmed, Disputed, Released }
+
+    struct Order {
+        address buyer;
+        address seller;
+        uint256 amount;
+        bytes32 photoHash; // hash de la foto entregada
+        string deliveryLocation; // ejemplo: coordenadas o dirección
+        DeliveryStatus status;
+        uint256 deliveryTimestamp;
+    }
+
+    uint256 public orderCount;
+    mapping(uint256 => Order) public orders;
+
+    event OrderCreated(uint256 orderId, address indexed buyer, address indexed seller, uint256 amount);
+    event DeliverySubmitted(uint256 orderId, bytes32 photoHash, string location);
+    event DeliveryConfirmed(uint256 orderId);
+    event PaymentReleased(uint256 orderId);
+
+    function createOrder(address _seller) external payable returns (uint256) {
+        require(msg.value > 0, "Payment required");
+
+        orderCount++;
+        orders[orderCount] = Order({
+            buyer: msg.sender,
+            seller: _seller,
+            amount: msg.value,
+            photoHash: 0,
+            deliveryLocation: "",
+            status: DeliveryStatus.Pending,
+            deliveryTimestamp: 0
+        });
+
+        emit OrderCreated(orderCount, msg.sender, _seller, msg.value);
+        return orderCount;
+    }
+
+    function submitDelivery(uint256 _orderId, bytes32 _photoHash, string calldata _location) external {
+        Order storage order = orders[_orderId];
+        require(msg.sender == order.seller, "Only seller can submit delivery");
+        require(order.status == DeliveryStatus.Pending, "Order not pending");
+
+        order.photoHash = _photoHash;
+        order.deliveryLocation = _location;
+        order.status = DeliveryStatus.Delivered;
+        order.deliveryTimestamp = block.timestamp;
+
+        emit DeliverySubmitted(_orderId, _photoHash, _location);
+    }
+
+    function confirmDelivery(uint256 _orderId) external {
+        Order storage order = orders[_orderId];
+        require(msg.sender == order.buyer, "Only buyer can confirm");
+        require(order.status == DeliveryStatus.Delivered, "Delivery not submitted");
+
+        order.status = DeliveryStatus.Confirmed;
+        _releasePayment(_orderId);
+
+        emit DeliveryConfirmed(_orderId);
+    }
+
+    function autoRelease(uint256 _orderId) external {
+        Order storage order = orders[_orderId];
+        require(order.status == DeliveryStatus.Delivered, "Delivery not submitted");
+        require(block.timestamp >= order.deliveryTimestamp + 1 days, "Grace period not over");
+
+        order.status = DeliveryStatus.Released;
+        _releasePayment(_orderId);
+    }
+
+    function _releasePayment(uint256 _orderId) internal {
+        Order storage order = orders[_orderId];
+        require(order.amount > 0, "Nothing to release");
+
+        uint256 amount = order.amount;
+        order.amount = 0;
+
+        payable(order.seller).transfer(amount);
+
+        emit PaymentReleased(_orderId);
+    }
+}
