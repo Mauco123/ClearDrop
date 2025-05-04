@@ -26,14 +26,14 @@ Usamos:
 
 ## 🔐 ¿Cómo Funciona?
 
-```text
+
 [Comprador] ---> [Contrato Escrow (zkSync)] ---> [Entrega Confirmada] ---> [Pago liberado al Repartidor]
                                          |
                                          +--> [Foto IPFS / Firma / Código QR]
 
----
 
-# Flujo paso a paso:
+
+## Flujo paso a paso:
 El comprador deposita ETH en el contrato inteligente.
 
 El contrato guarda el pago en custodia (escrow).
@@ -56,7 +56,7 @@ El contrato valida ambas partes y libera el pago.
 
 Si no se confirma en cierto tiempo, el comprador puede cancelar y se le reembolsa el dinero.
 
-# ⚙️ Arquitectura Técnica
+## ⚙️ Arquitectura Técnica
 
 [Comprador]          [Repartidor]            [Vendedor/Servicio]
      |                     |                        |
@@ -70,15 +70,15 @@ Si no se confirma en cierto tiempo, el comprador puede cancelar y se le reembols
      |                     |   EscrowDelivery.sol (Smart Contract)
 
 
-🛠️ Tecnologías Utilizadas
-1. zkSync Era
+## 🛠️ Tecnologías Utilizadas
+# 1. zkSync Era
 Blockchain de Capa 2 sobre Ethereum.
 
 Comisiones muy bajas y transacciones rápidas.
 
 Soporte para Solidity (misma sintaxis que Ethereum).
 
-2. Scaffold-ETH 2
+# 2. Scaffold-ETH 2
 Kit de desarrollo fullstack Web3.
 
 Incluye herramientas como:
@@ -89,7 +89,7 @@ Integración de wallets con wagmi.
 
 Frontend con React + Tailwind.
 
-3. Oráculo de Entrega
+# 3. Oráculo de Entrega
 Verificación de entrega mediante:
 
 Foto (almacenada en IPFS).
@@ -98,7 +98,7 @@ Código QR escaneado por el comprador.
 
 Firma del comprador usando su wallet.
 
-📦 Funcionalidades del Contrato EscrowDelivery.sol
+## 📦 Funcionalidades del Contrato EscrowDelivery.sol
 depositarFondos(): El comprador envía ETH.
 
 confirmarEntrega(): El repartidor notifica la entrega.
@@ -109,10 +109,10 @@ liberarFondos(): El contrato transfiere el ETH al repartidor.
 
 cancelarPedido(): Se activa si no se verifica la entrega dentro del tiempo definido.
 
-🖼️ UI (Diseño Visual)
+## 🖼️ UI (Diseño Visual)
 El diseño de la interfaz está hecho en v0.dev, enfocado en claridad y experiencia de usuario:
 
-🔗 Ver prototipo: UI en v0.dev
+## 🔗 Ver prototipo: UI en v0.dev
 
 Incluye secciones como:
 
@@ -124,14 +124,14 @@ Incluye secciones como:
 
 "Liberar o Reembolsar"
 
-🚀 Deploy & Test
+## 🚀 Deploy & Test
 Clona este repo y configura tu ambiente local con Scaffold-ETH 2.
 
 Despliega el contrato en zkSync Era.
 
 Conecta tu wallet y empieza a testear con usuarios simulados.
 
-💬 ¿Por qué es útil?
+## 💬 ¿Por qué es útil?
 Evita estafas en entregas.
 
 Custodia descentralizada y automática del dinero.
